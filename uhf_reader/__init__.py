@@ -12,4 +12,4 @@ from .uhf_reader import UNLOCK, UNLOCK_FOREVER, SECURE_LOCK, LOCK_FOREVER
 from .uhf_reader import InvalidParameterException, InvalidChecksumException, ErrorResponseException
 
 # Classes
-from .uhf_reader import UHDReader
+from .uhf_reader import UHFReader

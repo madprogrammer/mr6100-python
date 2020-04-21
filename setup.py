@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='uhf_reader',
-    version='0.1.1',
+    version='0.1.2',
     packages=['uhf_reader'],
     url='https://github.com/madprogrammer/mr6100-python',
     license='MIT',
