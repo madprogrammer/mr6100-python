@@ -1,9 +1,9 @@
 from setuptools import setup
 
 setup(
-    name='mr6100-python',
+    name='uhf_reader',
     version='0.1',
-    packages=['mr6100-python'],
+    packages=['uhf_reader'],
     url='https://github.com/madprogrammer/mr6100-python',
     license='MIT',
     author='Sergey Anufrienko',
