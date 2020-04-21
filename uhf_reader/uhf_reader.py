@@ -66,7 +66,7 @@ class ErrorResponseException(Exception):
             return "Unknown failure"
 
 
-class UHDReader:
+class UHFReader:
     buffer_size = 8192
     connection = None
     timeout = 5.0
