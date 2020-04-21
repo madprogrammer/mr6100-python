@@ -66,6 +66,10 @@ class ErrorResponseException(Exception):
             return "Unknown failure"
 
 
+class NetworkException(Exception):
+    pass
+
+
 class UHFReader:
     buffer_size = 8192
     connection = None
@@ -79,22 +83,25 @@ class UHFReader:
             self.host = kwargs.get('host', self.host)
             self.port = kwargs.get('port', self.port)
 
-    def connect(self):
+    def connect(self) -> None:
         """
         Open connection to the reader
-        :return: :class:`socket.socket`
         """
-        self.connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.connection.settimeout(self.timeout)
-        self.connection.connect((self.host, self.port))
-
-        return self.connection
+        try:
+            self.connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.connection.settimeout(self.timeout)
+            self.connection.connect((self.host, self.port))
+        except Exception as exc:
+            raise NetworkException("failed to connect: " + str(exc))
 
     def disconnect(self) -> None:
         """
         Close connection to the reader
         """
-        self.connection.close()
+        try:
+            self.connection.close()
+        except Exception as exc:
+            raise NetworkException("failed to disconnect: " + str(exc))
 
     def get_response(self) -> Dict[str, Any]:
         """
@@ -107,10 +114,13 @@ class UHFReader:
         deadline = time.time() + self.timeout
         while data is None:
             if time.time() >= deadline:
-                raise Exception()
+                raise NetworkException("receive timed out")
 
-            self.connection.settimeout(deadline - time.time())
-            data = self.connection.recv(self.buffer_size)
+            try:
+                self.connection.settimeout(deadline - time.time())
+                data = self.connection.recv(self.buffer_size)
+            except Exception as exc:
+                raise NetworkException("failed to receive: " + str(exc))
 
         if self.calculate_checksum(data[:-1]) != data[-1]:
             raise InvalidChecksumException()
@@ -142,7 +152,11 @@ class UHFReader:
         crc = self.calculate_checksum(packet).to_bytes(1, byteorder='big')
 
         request = head + packet + crc
-        self.connection.sendall(request)
+
+        try:
+            self.connection.sendall(request)
+        except Exception as exc:
+            raise NetworkException("failed to send: " + str(exc))
 
     @staticmethod
     def calculate_checksum(packet: bytes) -> int:
