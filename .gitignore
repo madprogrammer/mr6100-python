@@ -1,0 +1,3 @@
+*.pyc
+uhf_reader.egg-info
+dist/
