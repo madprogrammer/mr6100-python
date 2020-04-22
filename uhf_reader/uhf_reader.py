@@ -17,22 +17,105 @@ def deferred_stub():
 
 try:
     from twisted.internet import defer
-    deferred = defer.Deferred
+    deferred_wrapper = defer.Deferred
 except ImportError:
-    deferred = deferred_stub
+    deferred_wrapper = deferred_stub
 
 
 class AsyncUHFReader:
+    """
+    Asynchronous API implementation for Twisted
+    """
     def __init__(self, queue) -> None:
         self.queue = queue
 
     def __put_request(self, request) -> Any:
-        request.deferred = deferred()
+        request.deferred = deferred_wrapper()
         self.queue.put(request)
         return request.deferred
 
     def get_fw_version(self):
         return self.__put_request(GetFirmwareVersionRequest())
+
+    def reset_reader(self):
+        return self.__put_request(ResetReaderRequest())
+
+    def set_rf_power(self, power1: int = 20, power2: int = 2, power3: int = 32, power4: int = 0):
+        return self.__put_request(SetRadioPowerRequest(power1=power1, power2=power2, power3=power3, power4=power4))
+
+    def get_rf_power(self):
+        return self.__put_request(GetRadioPowerRequest())
+
+    def set_rf_channel(self, region=RADIO_FREQUENCY_EUROPE):
+        return self.__put_request(SetRadioFrequencyRequest(region=region))
+
+    def get_rf_channel(self):
+        return self.__put_request(GetRadioFrequencyRequest())
+
+    def gen2_sec_lock(self, password: int = 0, bank: int = USER, level: int = UNLOCK):
+        return self.__put_request(Gen2SecuredLockRequest(password=password, bank=bank, level=level))
+
+    def gen2_sec_write(self, data: bytes, password: int = 0, bank: int = USER, addr: int = 0):
+        return self.__put_request(Gen2SecuredWriteRequest(data, password=password, bank=bank, addr=addr))
+
+    def gen2_sec_read(self, password: int = 0, bank: int = EPC, addr: int = 0, count: int = 4):
+        return self.__put_request(Gen2SecuredReadRequest(password=password, bank=bank, addr=addr, count=count))
+
+    def gen2_sec_write_ex(self, data: bytes, password: int = 0, bank: int = USER):
+        if len(data) == 0:
+            return
+        if len(data) % 2 != 0:
+            data += b"\x00"
+        chunks = [data[i:i + 2] for i in range(0, len(data), 2)]
+
+        deferred = deferred_wrapper()
+
+        def chunk_write_callback(result):
+            request, response = result
+            if request.addr < len(chunks) - 1:
+                self.gen2_sec_write(chunks[request.addr + 1], password=password, bank=bank, addr=request.addr + 1) \
+                    .addCallbacks(chunk_write_callback, chunk_write_error)
+            else:
+                deferred.callback((request, response))
+
+        def chunk_write_error(failure):
+            deferred.errback(failure)
+
+        self.gen2_sec_write(chunks[0], password=password, bank=bank, addr=0) \
+            .addCallbacks(chunk_write_callback, chunk_write_error)
+
+        return deferred
+
+    def gen2_sec_read_ex(self, password: int = 0, bank: int = EPC, addr: int = 0, count: int = 16):
+        deferred = deferred_wrapper()
+        accumulator = b""
+
+        if count == 0:
+            deferred.callback(b"")
+            return deferred
+
+        if addr < 0:
+            raise InvalidParameterException("addr must be positive integer")
+
+        def chunk_read_callback(result):
+            nonlocal accumulator
+
+            request, response = result
+            accumulator += response.value()
+
+            if request.addr * 2 + 8 < addr + count:
+                self.gen2_sec_read(password=password, bank=bank, addr=request.addr + 4) \
+                    .addCallbacks(chunk_read_callback, chunk_read_error)
+            else:
+                deferred.callback(accumulator[addr % 8:addr % 8 + count])
+
+        def chunk_read_error(failure):
+            deferred.errback(failure)
+
+        self.gen2_sec_read(password=password, bank=bank, addr=8 * (addr // 8) // 2).addCallbacks(chunk_read_callback,
+                                                                                                 chunk_read_error)
+
+        return deferred
 
 
 class UHFReader:
@@ -139,17 +222,17 @@ class UHFReader:
         """
         return self.send_request_return_response(GetRadioPowerRequest())
 
-    def set_rf_frequency(self, region: int = RADIO_FREQUENCY_EUROPE) -> None:
+    def set_rf_channel(self, region: int = RADIO_FREQUENCY_EUROPE) -> None:
         """
         Set RF frequency region to operate
-        :param region: `RF_FREQUENCY_CHINA`, `RF_FREQUENCY_USA` or `RF_FREQUENCY_EUROPE`
+        :param region: `RADIO_FREQUENCY_CHINA`, `RADIO_FREQUENCY_USA` or `RADIO_FREQUENCY_EUROPE`
         """
         self.send_request_return_response(SetRadioFrequencyRequest(region))
 
-    def get_rf_frequency(self) -> int:
+    def get_rf_channel(self) -> int:
         """
         Get current RF frequency region setting
-        :return: `RF_FREQUENCY_CHINA`, `RF_FREQUENCY_USA`, `RF_FREQUENCY_EUROPE` or `RF_FREQUENCY_CUSTOM`
+        :return: `RADIO_FREQUENCY_CHINA`, `RADIO_FREQUENCY_USA`, `RADIO_FREQUENCY_EUROPE` or `RADIO_FREQUENCY_CUSTOM`
         """
         return self.send_request_return_response(GetRadioFrequencyRequest())
 

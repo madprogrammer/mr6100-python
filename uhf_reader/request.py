@@ -1,6 +1,6 @@
 from uhf_reader.packet import UHFPacket
 from uhf_reader.response import UHFResponse, GetFirmwareVersionResponse, GetRadioPowerResponse, \
-    GetRadioFrequencyResponse
+    GetRadioFrequencyResponse, Gen2SecuredReadResponse
 from uhf_reader.exceptions import InvalidParameterException
 
 from uhf_reader.constants import GET_FIRMWARE_VERSION, RESET_READER, SET_RADIO_POWER, GET_RADIO_POWER, \
@@ -102,7 +102,14 @@ class Gen2SecuredReadRequest(UHFRequest):
         args = self._get_password_bank_param(password, bank, addr)
         args += count.to_bytes(1, byteorder='big')
 
+        self.addr = addr
+        self.count = count
+
         super().__init__(GEN2_SECURED_READ, args)
+
+    @staticmethod
+    def parse_response(data: bytes) -> Gen2SecuredReadResponse:
+        return Gen2SecuredReadResponse(data)
 
 
 class Gen2SecuredWriteRequest(UHFRequest):
@@ -112,6 +119,8 @@ class Gen2SecuredWriteRequest(UHFRequest):
 
         args = self._get_password_bank_param(password, bank, addr)
         args += data
+
+        self.addr = addr
 
         super().__init__(GEN2_SECURED_WRITE, args)
 

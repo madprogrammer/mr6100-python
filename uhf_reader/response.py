@@ -76,3 +76,10 @@ class GetRadioFrequencyResponse(UHFResponse):
 
     def value(self) -> int:
         return self.region
+
+
+class Gen2SecuredReadResponse(UHFResponse):
+    def __init__(self, data: bytes):
+        super().__init__(data)
+
+        self.payload = self.payload[1:]
