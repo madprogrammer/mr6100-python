@@ -1,76 +1,44 @@
+import os
 import socket
 import time
-import os
 
-from typing import Dict, Tuple, Any
+from typing import Tuple, Any
 
-# Reader defined commands
-RESET_READER = b"\x21"
-GET_FIRMWARE_VERSION = b"\x22"
-
-SET_RF_POWER = b"\x25"
-GET_RF_POWER = b"\x26"
-SET_RF_FREQUENCY = b"\x27"
-GET_RF_FREQUENCY = b"\x28"
-
-GEN2_SECURED_READ = b"\x88"
-GEN2_SECURED_WRITE = b"\x89"
-GEN2_SECURED_LOCK = b"\x8A"
-
-# RF frequency settings
-RF_FREQUENCY_CHINA = 0
-RF_FREQUENCY_USA = 1
-RF_FREQUENCY_EUROPE = 2
-RF_FREQUENCY_CUSTOM = 3
-
-# Memory Bank IDs
-RESERVED = 0
-EPC = 1
-TID = 2
-USER = 3
-
-# Lock levels
-UNLOCK = 0
-UNLOCK_FOREVER = 1
-SECURE_LOCK = 2
-LOCK_FOREVER = 3
+from .request import UHFRequest, GetFirmwareVersionRequest, ResetReaderRequest, SetRadioPowerRequest, \
+    GetRadioPowerRequest, SetRadioFrequencyRequest, GetRadioFrequencyRequest, Gen2SecuredReadRequest, \
+    Gen2SecuredWriteRequest, Gen2SecuredLockRequest
+from .exceptions import NetworkException, InvalidParameterException
+from .constants import RADIO_FREQUENCY_EUROPE, USER, EPC, UNLOCK
 
 
-class InvalidParameterException(Exception):
-    pass
+def deferred_stub():
+    return None
 
 
-class InvalidChecksumException(Exception):
-    pass
+try:
+    from twisted.internet import defer
+    deferred = defer.Deferred
+except ImportError:
+    deferred = deferred_stub
 
 
-class ErrorResponseException(Exception):
-    def __init__(self, *args, **kwargs):
-        self.code = kwargs.get('code', 0)
-        super().__init__(self.__get_message())
+class AsyncUHFReader:
+    def __init__(self, queue) -> None:
+        self.queue = queue
 
-    def __get_message(self):
-        try:
-            return {
-                0x00: "No error",
-                0x01: "General error",
-                0x02: "Parameter setting failed",
-                0x03: "Parameter reading failed",
-                0x04: "No tag",
-                0x05: "Tag reading failed",
-                0x06: "Tag writing failed",
-                0x07: "Tag locking failed",
-                0x08: "Tag erase failed"
-            }[self.code]
-        except KeyError:
-            return "Unknown failure"
+    def __put_request(self, request) -> Any:
+        request.deferred = deferred()
+        self.queue.put(request)
+        return request.deferred
 
-
-class NetworkException(Exception):
-    pass
+    def get_fw_version(self):
+        return self.__put_request(GetFirmwareVersionRequest())
 
 
 class UHFReader:
+    """
+    Synchronous TCP client implementation
+    """
     buffer_size = 8192
     connection = None
     timeout = 5.0
@@ -103,11 +71,11 @@ class UHFReader:
         except Exception as exc:
             raise NetworkException("failed to disconnect: " + str(exc))
 
-    def get_response(self) -> Dict[str, Any]:
+    def get_response(self) -> bytes:
         """
-        Get reader response as `dict`, validate checksum and status byte
-        :return: `dict` with reader response
-        :raises: :class:`InvalidChecksumException`, :class:`ErrorResponseException`
+        Get reader response
+        :return: bytes
+        :raises: :class:`InvalidChecksumException`, :class:`ErrorResponseException`, :class:`InvalidPacketException`
         """
         data = None
 
@@ -122,63 +90,22 @@ class UHFReader:
             except Exception as exc:
                 raise NetworkException("failed to receive: " + str(exc))
 
-        if self.calculate_checksum(data[:-1]) != data[-1]:
-            raise InvalidChecksumException()
+        return data
 
-        response = {
-            'addr': data[1],
-            'len': data[2],
-            'status': data[3],
-            'data': data[4:-1],
-            'chksum': data[-1]
-        }
-
-        if response['status'] != 0:
-            raise ErrorResponseException(code=response['status'])
-
-        return response
-
-    def send_command(self, cmd: bytes, data: bytes = b"") -> None:
+    def send_request(self, request: UHFRequest) -> None:
         """
-        Send command to the reader
-        :param cmd: Operation code, e.g. `GET_FIRMWARE_VERSION`
-        :param data: Command payload, if needed
+        Send request to the reader
+        :param request: :class:`UHFRequest`
         """
-        head = b"\x0A"
-        addr = b"\xFF"
-        length = (len(cmd) + len(data) + 1).to_bytes(1, byteorder="big")
-
-        packet = addr + length + cmd + data
-        crc = self.calculate_checksum(packet).to_bytes(1, byteorder='big')
-
-        request = head + packet + crc
 
         try:
-            self.connection.sendall(request)
+            self.connection.sendall(request.data)
         except Exception as exc:
             raise NetworkException("failed to send: " + str(exc))
 
-    @staticmethod
-    def calculate_checksum(packet: bytes) -> int:
-        """
-        Calculate checksum for the packet
-        :param packet: Binary string to calculate the checksum forr
-        :rtype: int
-        :return: Checksum value
-        """
-        checksum = 0
-
-        for x in packet:
-            checksum = checksum + x
-            if checksum > 255:
-                checksum = checksum.to_bytes(2, byteorder='big')[1]
-
-        checksum = ((~checksum) + 1) & 0xff
-
-        if checksum > 255:
-            checksum = checksum.to_bytes(2, byteorder='big')[1]
-
-        return checksum
+    def send_request_return_response(self, request) -> Any:
+        self.send_request(request)
+        return request.parse_response(self.get_response()).value()
 
     def get_fw_version(self) -> Tuple[int, int]:
         """
@@ -186,15 +113,13 @@ class UHFReader:
         :rtype: object
         :return: tuple with major & minor version, e.g. `(6, 3)`
         """
-        self.send_command(GET_FIRMWARE_VERSION)
-        response = self.get_response()['data']
-        return response[0], response[1]
+        return self.send_request_return_response(GetFirmwareVersionRequest())
 
     def reset_reader(self) -> None:
         """
         Reset the reader
         """
-        self.send_command(RESET_READER)
+        self.send_request(ResetReaderRequest())
 
     def set_rf_power(self, power1: int = 20, power2: int = 2, power3: int = 32, power4: int = 0) -> None:
         """
@@ -204,70 +129,36 @@ class UHFReader:
         :param power3: Power for the third antenna
         :param power4: Power for the fourth antenna
         """
-        data = power1.to_bytes(1, byteorder='big')
-        data += power2.to_bytes(1, byteorder='big')
-        data += power3.to_bytes(1, byteorder='big')
-        data += power4.to_bytes(1, byteorder='big')
-
-        self.send_command(SET_RF_POWER, data)
-        self.get_response()
+        self.send_request_return_response(SetRadioPowerRequest(power1=power1, power2=power2,
+                                                               power3=power3, power4=power4))
 
     def get_rf_power(self) -> Tuple[int, int, int, int]:
         """
         Get RF transmit power setting for reader antennas (0-30 dBm). Not all antennas may be present.
         :return: tuple with current RF transmit power for each antenna, e.g. `(20, 2, 30, 0)`
         """
-        self.send_command(GET_RF_POWER)
-        response = self.get_response()['data']
-        return response[0], response[1], response[2], response[3]
+        return self.send_request_return_response(GetRadioPowerRequest())
 
-    def set_rf_frequency(self, region: int = RF_FREQUENCY_EUROPE) -> None:
+    def set_rf_frequency(self, region: int = RADIO_FREQUENCY_EUROPE) -> None:
         """
         Set RF frequency region to operate
         :param region: `RF_FREQUENCY_CHINA`, `RF_FREQUENCY_USA` or `RF_FREQUENCY_EUROPE`
         """
-        self.send_command(SET_RF_FREQUENCY, b"\x00" + region.to_bytes(1, byteorder='big'))
-        self.get_response()
+        self.send_request_return_response(SetRadioFrequencyRequest(region))
 
     def get_rf_frequency(self) -> int:
         """
         Get current RF frequency region setting
         :return: `RF_FREQUENCY_CHINA`, `RF_FREQUENCY_USA`, `RF_FREQUENCY_EUROPE` or `RF_FREQUENCY_CUSTOM`
         """
-        self.send_command(GET_RF_FREQUENCY)
-        response = self.get_response()['data']
-        if response[0] == 0:
-            return response[1]
-        return RF_FREQUENCY_CUSTOM
-
-    @staticmethod
-    def __get_password_bank_param(password: int, bank: int, param: int) -> bytes:
-        value = (password >> 24 & 0xff).to_bytes(1, byteorder='big')
-        value += (password >> 16 & 0xff).to_bytes(1, byteorder='big')
-        value += (password >> 8 & 0xff).to_bytes(1, byteorder='big')
-        value += (password & 0xff).to_bytes(1, byteorder='big')
-        value += bank.to_bytes(1, byteorder='big')
-        value += int(param).to_bytes(1, byteorder='big')
-        return value
+        return self.send_request_return_response(GetRadioFrequencyRequest())
 
     def __gen2_sec_read(self, password: int = 0, bank: int = EPC, addr: int = 0, count: int = 4) -> bytes:
-        value = self.__get_password_bank_param(password, bank, addr)
-        value += count.to_bytes(1, byteorder='big')
+        return self.send_request_return_response(Gen2SecuredReadRequest(password=password, bank=bank,
+                                                                        addr=addr, count=count))
 
-        self.send_command(GEN2_SECURED_READ, value)
-        response = self.get_response()['data'][1:]
-
-        return response
-
-    def __gen2_sec_write(self, data: bytes, password: int = 0, bank: int = USER, addr: int = 0) -> None:
-        if len(data) != 2:
-            raise InvalidParameterException("Data must be 2 bytes long")
-
-        value = self.__get_password_bank_param(password, bank, addr)
-        value += data
-
-        self.send_command(GEN2_SECURED_WRITE, value)
-        self.get_response()
+    def __gen2_sec_write(self, data: bytes, password: int = 0, bank: int = USER, addr: int = 0) -> bytes:
+        return self.send_request_return_response(Gen2SecuredWriteRequest(data, password=password, bank=bank, addr=addr))
 
     def gen2_sec_lock(self, password: int = 0, bank: int = USER, level: int = UNLOCK) -> None:
         """
@@ -276,10 +167,7 @@ class UHFReader:
         :param bank: Memory bank to lock/unlock (`RESERVED`, `EPC`, `TID`, `USER`)
         :param level: Lock level (`UNLOCK`, `UNLOCK_FOREVER`, `SECURE_LOCK`, `LOCK_FOREVER`)
         """
-        value = self.__get_password_bank_param(password, bank, level)
-
-        self.send_command(GEN2_SECURED_LOCK, value)
-        self.get_response()
+        self.send_request_return_response(Gen2SecuredLockRequest(password=password, bank=bank, level=level))
 
     def gen2_sec_write(self, data: bytes, password: int = 0, bank: int = USER) -> None:
         """
