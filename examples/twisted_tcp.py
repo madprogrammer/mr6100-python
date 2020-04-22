@@ -24,7 +24,7 @@ class UHFReaderProtocol(uhf_reader.protocol.UHFReaderProtocolBase):
         super().connectionMade()
 
         logger.info("Connection established")
-        deferred = reader.gen2_sec_read_ex(bank=uhf_reader.USER, addr=3, count=0)
+        deferred = reader.gen2_sec_read_ex(bank=uhf_reader.USER, addr=3, count=16)
         deferred.addCallbacks(lambda result: print(binascii.hexlify(result)),
                               lambda err: print(err))
 
