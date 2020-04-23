@@ -24,6 +24,9 @@ class UHFReaderClientFactory(ReconnectingClientFactory):
 
     def clientConnectionLost(self, connector, reason):
         self.logger.error("Lost connection to UHF reader. Reason: " + str(reason))
+        super(UHFReaderClientFactory, self).clientConnectionLost(connector, reason)
 
     def clientConnectionFailed(self, connector, reason):
         self.logger.error("Connection to UHF reader failed. Reason: " + str(reason))
+        super(UHFReaderClientFactory, self).clientConnectionFailed(connector, reason)
+
