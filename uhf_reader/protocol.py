@@ -10,6 +10,7 @@ from uhf_reader.exceptions import RequestTimeoutException
 class UHFReaderProtocolBase(Protocol, TimeoutMixin):
     request = None
     timeout_id = None
+    peer_id = None
 
     def dataReceived(self, data):
         try:
@@ -32,6 +33,8 @@ class UHFReaderProtocolBase(Protocol, TimeoutMixin):
         self.checkQueue()
 
     def connectionMade(self):
+        peer = self.transport.getPeer()
+        self.peer_id = "{}:{}".format(peer.host, peer.port)
         self.setTimeout(None)
         self.checkQueue()
 
@@ -50,7 +53,7 @@ class UHFReaderProtocolBase(Protocol, TimeoutMixin):
             return
 
         try:
-            item = self.factory.queue.get(block=False)
+            item = self.factory.getQueue(self.peer_id).get(block=False)
             self.transport.write(item.build())
             self.factory.logger.debug("Sent request: %s", item)
 

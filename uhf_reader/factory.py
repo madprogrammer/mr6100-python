@@ -1,18 +1,23 @@
 import logging
+import queue
 
+from collections import defaultdict
 from twisted.internet.protocol import ReconnectingClientFactory
 
 
 class UHFReaderClientFactory(ReconnectingClientFactory):
-    def __init__(self, timeout=5, queue=None, **kwargs):
+    def __init__(self, timeout=5, **kwargs):
         super().__init__(**kwargs)
         self.timeout = timeout
-        self.queue = queue
+        self.queues = defaultdict(queue.Queue)
         self.logger = logging.getLogger(__name__)
 
         # Override default factor & delay
         self.factor = 1.5
         self.maxDelay = 5.0
+
+    def getQueue(self, peer_id):
+        return self.queues[peer_id]
 
     def startedConnecting(self, connector):
         self.logger.info("Started to connect to UHF reader")
