@@ -7,7 +7,7 @@ from twisted.protocols.policies import TimeoutMixin
 from uhf_reader.exceptions import RequestTimeoutException
 
 
-class UHFReaderProtocolBase(Protocol, TimeoutMixin):
+class UHFReaderProtocolBase(Protocol):
     request = None
     timeout_id = None
     peer_id = None
@@ -18,9 +18,6 @@ class UHFReaderProtocolBase(Protocol, TimeoutMixin):
             if self.request:
                 response = self.request.parse_response(data)
                 self.factory.logger.debug("Received response: %s", response.value())
-
-                self.setTimeout(None)
-                self.resetTimeout()
 
                 if self.request.deferred:
                     self.request.deferred.callback((self.request, response))
@@ -37,7 +34,6 @@ class UHFReaderProtocolBase(Protocol, TimeoutMixin):
         peer = self.transport.getPeer()
         self.peer_id = "{}:{}".format(peer.host, peer.port)
         self.queue = self.factory.getQueue(self.peer_id)
-        self.setTimeout(None)
         self.checkQueue()
 
     def timeoutConnection(self):
@@ -60,8 +56,6 @@ class UHFReaderProtocolBase(Protocol, TimeoutMixin):
             self.factory.logger.debug("Sent request: %s", item)
 
             if self.factory.timeout:
-                self.setTimeout(self.factory.timeout)
-                self.resetTimeout()
                 self.timeout_id = reactor.callLater(self.factory.timeout, self.timeoutRequest)
 
             self.request = item
