@@ -11,6 +11,7 @@ class UHFReaderProtocolBase(Protocol, TimeoutMixin):
     request = None
     timeout_id = None
     peer_id = None
+    queue = None
 
     def dataReceived(self, data):
         try:
@@ -35,6 +36,7 @@ class UHFReaderProtocolBase(Protocol, TimeoutMixin):
     def connectionMade(self):
         peer = self.transport.getPeer()
         self.peer_id = "{}:{}".format(peer.host, peer.port)
+        self.queue = self.factory.getQueue(self.peer_id)
         self.setTimeout(None)
         self.checkQueue()
 
@@ -49,11 +51,11 @@ class UHFReaderProtocolBase(Protocol, TimeoutMixin):
         self.checkQueue()
 
     def checkQueue(self):
-        if not self.factory.queue:
+        if not self.queue:
             return
 
         try:
-            item = self.factory.getQueue(self.peer_id).get(block=False)
+            item = self.queue.get(block=False)
             self.transport.write(item.build())
             self.factory.logger.debug("Sent request: %s", item)
 
